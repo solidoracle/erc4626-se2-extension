@@ -36,7 +36,7 @@ contract Vault is ERC4626, Owned, ReentrancyGuard {
         ERC20 _UNDERLYING,
         address _owner
     )
-        ERC4626(_UNDERLYING, "MantleVault", "MVT")
+        ERC4626(_UNDERLYING, "Vault", "VLT")
         Owned(_owner)
     {
         // implicitly inherited from ERC20, which is passed as an argument to the ERC4626 constructor. 
@@ -94,118 +94,31 @@ contract Vault is ERC4626, Owned, ReentrancyGuard {
 
 
     function addTrustedStrategy(Strategy _strategy, uint8 _weight) external onlyOwner {
-        // Ensure the strategy accepts the correct underlying token.
-        // If the strategy accepts ETH the Vault should accept WETH, it'll handle wrapping when necessary.
-        // require(
-        //     strategy.isCEther() ? underlyingIsWETH : ERC20Strategy(address(strategy)).underlying() == UNDERLYING,
-        //     "WRONG_UNDERLYING"
-        // );
-
-        // require weight is between 0 and 100
-
         // Store the strategy as trusted.
         getStrategyData[_strategy].trusted = true;
         getStrategyData[_strategy].weight = _weight;
         strategies.push(_strategy);
-
-        // check that strategies add up to 100
     }
 
     /**
      * @inheritdoc ERC4626
      */
     function afterDeposit(uint256 assets, uint256) internal override nonReentrant {
-        // // deposit assets to Aave
-        // ERC20(asset).approve(aave, assets);
-        // // we are not considering the float here -- we are depositing everything
-        // IPool(aave).supply(address(asset), assets, address(this), 0);
-        // // Increase totalHoldings to account for the deposit.
-        // totalHoldings += assets;
-
-        // for each trusted strategy, allocate the funds according to the weight
-        for (uint256 i = 0; i < strategies.length; i++) {
-
-            Strategy strategy = strategies[i];
-            StrategyData storage data = getStrategyData[strategy];
-            if (data.trusted) {
-
-                //depositIntoStrategy
-                uint256 strategyAmount = assets.mulDivDown(data.weight, 100); // need more precision here
-                // deposit assets to strategy
-
-                ERC20(asset).approve(address(strategy), strategyAmount);
-                ERC20(asset).transfer(address(strategy), strategyAmount);
-                strategy.deposit(strategyAmount);
-
-                // Increase totalStrategyHoldings to account for the deposit.
-                // TOTAL STRATEGY HOLDINGS != TOTAL HOLDINGS
-                totalStrategyHoldings += strategyAmount;
-            }
-        }
     }
     
 
     
     function beforeWithdraw(uint256 assets, uint256) internal override {
-        // Retrieve underlying tokens from strategy/float.
-        retrieveUnderlying(assets);
     }
 
-    /// @dev Retrieves a specific amount of underlying tokens held in the strategy and/or float.
-    /// @dev Only withdraws from strategies if needed and maintains the target float percentage if possible.
-    /// @param underlyingAmount The amount of underlying tokens to retrieve.
-    function retrieveUnderlying(uint256 underlyingAmount) internal {
-        totalStrategyHoldings = totalAssets();
-
-        pullFromStrategy(underlyingAmount);
-    }
 
     /*///////////////////////////////////////////////////////////////
-                        STRATEGY WITHDRAWAL LOGIC
+                        REDEEM LOGIC
     //////////////////////////////////////////////////////////////*/
 
-    function pullFromStrategy(uint256 underlyingAmount) public {
-        // IPool(aave).withdraw(address(asset), underlyingAmount, address(this));
-
-        // for each trusted strategy, allocate the funds according to the weight
-        for (uint256 i = 0; i < strategies.length; i++) {
-
-            Strategy strategy = strategies[i];
-            StrategyData storage data = getStrategyData[strategy];
-            if (data.trusted) {
-
-                //withdrawFromStrategy
-                uint256 withdrawAmount = underlyingAmount.mulDivDown(data.weight, 100); // need more precision here
-
-   
-                strategy.redeemUnderlying(withdrawAmount);
-
-
-                totalStrategyHoldings -= withdrawAmount;
-            }
-        }
-        // unchecked {
-        //     totalHoldings -= underlyingAmount;
-        // }
-    }
-
-    function withdraw(
-        uint256 assets,
-        address receiver,
-        address owner
-    ) public override returns (uint256 shares) {
-        shares = previewWithdraw(assets); // No need to check for rounding error, previewWithdraw rounds up.
-
-        if (msg.sender != owner) {
-            uint256 allowed = allowance[owner][msg.sender]; // Saves gas for limited approvals.
-
-            if (allowed != type(uint256).max) allowance[owner][msg.sender] = allowed - shares;
-        }
-
-        beforeWithdraw(assets, shares);
-
+    function redeem(uint256 shares, address receiver, address owner) public override returns (uint256 assets) {
+        assets = previewRedeem(shares);
         _burn(owner, shares);
-
         emit Withdraw(msg.sender, receiver, owner, assets, shares);
         asset.safeTransfer(receiver, assets);
     }
@@ -296,18 +209,4 @@ contract Vault is ERC4626, Owned, ReentrancyGuard {
 
         emit FeePercentUpdated(msg.sender, newFeePercent);
     }
-
-    /*///////////////////////////////////////////////////////////////
-                          RECIEVE ETHER LOGIC
-    //////////////////////////////////////////////////////////////*/
-
-    /// @dev Required for the Vault to receive unwrapped ETH.
-    receive() external payable {
-        // Convert the MATIC to WMATIC
-        // WMATIC(payable(address(asset))).deposit{value: msg.value}();
-
-        // Deposit the WMATIC to the Vault
-        // this.deposit(msg.value, msg.sender);
-     }
-
 }
